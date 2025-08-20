@@ -1,0 +1,137 @@
+-- -----------------------------------------------
+-- 1. Тестовые кассиры (cashiers)
+-- -----------------------------------------------
+INSERT INTO cashiers (login, password_hash, full_name, role) VALUES
+('kassir1', '$2b$12$X9v6.3gR4xqF6Y1Z7a8b9e0f1g2h3i4j5k6l7m8n9o0p1q2r3s4t5u6v7w8x9y0z', 'Иван Петров', 'cashier'),
+('kassir2', '$2b$12$X9v6.3gR4xqF6Y1Z7a8b9e0f1g2h3i4j5k6l7m8n9o0p1q2r3s4t5u6v7w8x9y0z', 'Мария Сидорова', 'cashier'),
+('admin', '$2b$12$X9v6.3gR4xqF6Y1Z7a8b9e0f1g2h3i4j5k6l7m8n9o0p1q2r3s4t5u6v7w8x9y0z', 'Алексей Кузнецов', 'admin'),
+('it', '$2b$12$X9v6.3gR4xqF6Y1Z7a8b9e0f1g2h3i4j5k6l7m8n9o0p1q2r3s4t5u6v7w8x9y0z', 'Дмитрий Фролов', 'it');
+
+-- -----------------------------------------------
+-- 2. Тестовые ККТ (kkt_devices)
+-- -----------------------------------------------
+INSERT INTO kkt_devices (kkt_ip, serial_number_fn, model, logical_name, status) VALUES
+('192.168.1.100', 'FN123456789', 'АТОЛ 30Ф', 'ККТ в холле', 'active'),
+('192.168.1.101', 'FN987654321', 'Штрих-М 115Ф', 'Касса №2', 'active'),
+('192.168.1.102', 'FN555555555', 'Меркурий 115Ф', 'Резервная касса', 'inactive');
+
+-- -----------------------------------------------
+-- 3. Тестовые пин-пады (pinpads)
+-- -----------------------------------------------
+INSERT INTO pinpads (pinpad_ip, model, logical_name, bank_name, status) VALUES
+('192.168.1.200', 'PAX A920', 'Пин-пад у кассы 1', 'Сбербанк', 'active'),
+('192.168.1.201', 'Ingenico iCT250', 'Пин-пад у кассы 2', 'Тинькофф', 'active'),
+('192.168.1.202', 'PAX S920', 'Пин-пад в резерве', 'ВТБ', 'inactive');
+
+-- -----------------------------------------------
+-- 4. Тестовые кассовые места (workstations)
+-- -----------------------------------------------
+INSERT INTO workstations (name, kkt_id, pinpad_id, cashier_id, is_active) VALUES
+('Касса №1', 1, 1, NULL, true),
+('Касса №2', 2, 2, 1, true),
+('Резервная касса', 3, 3, NULL, false);
+
+-- -----------------------------------------------
+-- 5. Тестовые чеки (checks)
+-- -----------------------------------------------
+INSERT INTO checks (
+  cashier_id,
+  ws_id,
+  positions,
+  total_amount,
+  payment_type,
+  status,
+  created_at
+) VALUES
+(
+  1, 1,
+  '[{"name": "Отопление", "price": 1500.00, "quantity": 1, "tax": "none"}, {"name": "Вода", "price": 500.00, "quantity": 1, "tax": "none"}]',
+  2000.00,
+  'card',
+  'success',
+  NOW() - INTERVAL '2 hours'
+),
+(
+  1, 1,
+  '[{"name": "Электричество", "price": 800.00, "quantity": 1, "tax": "none"}]',
+  800.00,
+  'cash',
+  'success',
+  NOW() - INTERVAL '1 hour'
+),
+(
+  2, 2,
+  '[{"name": "Газ", "price": 600.00, "quantity": 1, "tax": "none"}]',
+  600.00,
+  'card',
+  'kkt_error',
+  NOW() - INTERVAL '30 minutes'
+),
+(
+  1, 1,
+  '[{"name": "Домофон", "price": 200.00, "quantity": 1, "tax": "none"}]',
+  200.00,
+  'card',
+  'payment_error',
+  NOW() - INTERVAL '10 minutes'
+),
+(
+  1, 1,
+  '[{"name": "Уборка", "price": 300.00, "quantity": 1, "tax": "none"}]',
+  300.00,
+  'cash',
+  'pending',
+  NOW() - INTERVAL '2 minutes'
+);
+
+-- Обновим один чек, добавив fiscal_data (успешная фискализация)
+UPDATE checks SET fiscal_data = '{
+  "fn": "1234567890123456",
+  "fd": 987654321,
+  "fpd": "ABC123DEF456",
+  "date_time": "2025-04-05T14:30:00"
+}' WHERE check_id = 1;
+
+-- Добавим pos_data для оплаты картой
+UPDATE checks SET pos_data = '{
+  "rrn": "123456789012",
+  "auth_code": "123456",
+  "card_mask": "****1234",
+  "transaction_id": "TXN001"
+}' WHERE check_id = 1;
+
+-- -----------------------------------------------
+-- 6. Тестовые фоновые задачи (background_tasks)
+-- -----------------------------------------------
+INSERT INTO background_tasks (
+  task_type,
+  target_id,
+  payload,
+  status,
+  created_at,
+  last_attempt_at,
+  retry_count,
+  next_retry_at,
+  related_check_id
+) VALUES
+-- Успешная задача на оплату
+('process_payment', 200, '{"check_id": 1, "amount": 2000.00}', 'completed', NOW() - INTERVAL '2 hours', NOW() - INTERVAL '2 hours', 1, NULL, 1),
+
+-- Успешная задача на печать чека
+('send_to_kkt', 100, '{"check_id": 1, "amount": 2000.00}', 'completed', NOW() - INTERVAL '2 hours', NOW() - INTERVAL '2 hours', 1, NULL, 1),
+
+-- Ошибка при оплате, нужно повторить
+('process_payment', 201, '{"check_id": 4, "amount": 200.00}', 'failed', NOW() - INTERVAL '10 minutes', NOW() - INTERVAL '8 minutes', 2, NOW() + INTERVAL '1 minute', 4),
+
+-- Ошибка при отправке в ККТ, повтор через 30 сек
+('send_to_kkt', 101, '{"check_id": 3, "amount": 600.00}', 'failed', NOW() - INTERVAL '30 minutes', NOW() - INTERVAL '25 minutes', 3, NOW() + INTERVAL '30 seconds', 3),
+
+-- Новая задача на оплату (в очереди)
+('process_payment', 200, '{"check_id": 5, "amount": 300.00}', 'pending', NOW() - INTERVAL '2 minutes', NULL, 0, NULL, 5);
+
+INSERT INTO customers (full_name, account_number, address, phone, email) VALUES
+('Иванов Иван Иванович', '1001', 'ул. Ленина, д. 10, кв. 1', '+7 (495) 123-45-61', 'ivanov@example.com'),
+('Петров Пётр Петрович', '1002', 'ул. Мира, д. 15, кв. 8', '+7 (495) 123-45-62', 'petrov@example.com'),
+('Сидорова Анна Николаевна', '1003', 'пр. Победы, д. 5, кв. 12', '+7 (495) 123-45-63', 'sidorova@example.com'),
+('Кузнецов Дмитрий Сергеевич', '1004', 'пер. Тихий, д. 3, кв. 5', '+7 (495) 123-45-64', 'kuznetsov@example.com'),
+('Михайлова Елена Владимировна', '1005', 'пл. Свободы, д. 7, кв. 3', '+7 (495) 123-45-65', 'mikhailova@example.com');

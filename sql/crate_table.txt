@@ -1,0 +1,160 @@
+-- Включаем расширение для генерации UUID (опционально)
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+-- -----------------------------------------------------
+-- Таблица: cashiers (пользователи: кассиры, администраторы, ИТ)
+-- -----------------------------------------------------
+CREATE TABLE IF NOT EXISTS cashiers (
+    cashier_id    SERIAL PRIMARY KEY,
+    login         VARCHAR(100) NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    full_name     VARCHAR(255) NOT NULL,
+    role          VARCHAR(20) NOT NULL CHECK (role IN ('cashier', 'admin', 'it')),
+    created_at    TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at    TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Индексы
+CREATE INDEX IF NOT EXISTS idx_cashiers_login ON cashiers(login);
+CREATE INDEX IF NOT EXISTS idx_cashiers_role ON cashiers(role);
+
+-- -----------------------------------------------------
+-- Таблица: kkt_devices (Контрольно-кассовая техника)
+-- -----------------------------------------------------
+CREATE TABLE IF NOT EXISTS kkt_devices (
+    kkt_id             SERIAL PRIMARY KEY,
+    kkt_ip             INET NOT NULL,
+    serial_number_fn   VARCHAR(50) NOT NULL,
+    model              VARCHAR(100) NOT NULL,
+    logical_name       VARCHAR(100) NOT NULL,
+    status             VARCHAR(20) NOT NULL DEFAULT 'active' 
+                       CHECK (status IN ('active', 'inactive', 'in_repair', 'connection_error')),
+    created_at         TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at         TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Индексы
+CREATE INDEX IF NOT EXISTS idx_kkt_devices_ip ON kkt_devices(kkt_ip);
+CREATE INDEX IF NOT EXISTS idx_kkt_devices_logical_name ON kkt_devices(logical_name);
+CREATE INDEX IF NOT EXISTS idx_kkt_devices_status ON kkt_devices(status);
+
+-- -----------------------------------------------------
+-- Таблица: pinpads (пин-пады)
+-- -----------------------------------------------------
+CREATE TABLE IF NOT EXISTS pinpads (
+    pinpad_id      SERIAL PRIMARY KEY,
+    pinpad_ip      INET NOT NULL,
+    model          VARCHAR(100) NOT NULL,
+    logical_name   VARCHAR(100) NOT NULL,
+    bank_name      VARCHAR(100),
+    status         VARCHAR(20) NOT NULL DEFAULT 'active' 
+                   CHECK (status IN ('active', 'inactive', 'connection_error')),
+    created_at     TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at     TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Индексы
+CREATE INDEX IF NOT EXISTS idx_pinpads_ip ON pinpads(pinpad_ip);
+CREATE INDEX IF NOT EXISTS idx_pinpads_logical_name ON pinpads(logical_name);
+CREATE INDEX IF NOT EXISTS idx_pinpads_bank ON pinpads(bank_name);
+CREATE INDEX IF NOT EXISTS idx_pinpads_status ON pinpads(status);
+
+-- -----------------------------------------------------
+-- Таблица: workstations (кассовые места)
+-- -----------------------------------------------------
+CREATE TABLE IF NOT EXISTS workstations (
+    ws_id        SERIAL PRIMARY KEY,
+    name         VARCHAR(100) NOT NULL,
+    kkt_id       INTEGER NOT NULL,
+    pinpad_id    INTEGER NOT NULL,
+    cashier_id   INTEGER,
+    is_active    BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at   TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at   TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_workstation_kkt FOREIGN KEY (kkt_id) REFERENCES kkt_devices(kkt_id) ON DELETE RESTRICT,
+    CONSTRAINT fk_workstation_pinpad FOREIGN KEY (pinpad_id) REFERENCES pinpads(pinpad_id) ON DELETE RESTRICT,
+    CONSTRAINT fk_workstation_cashier FOREIGN KEY (cashier_id) REFERENCES cashiers(cashier_id) ON DELETE SET NULL,
+    CONSTRAINT uq_kkt_pinpad UNIQUE (kkt_id, pinpad_id)
+);
+
+-- Индексы
+CREATE INDEX IF NOT EXISTS idx_workstations_kkt ON workstations(kkt_id);
+CREATE INDEX IF NOT EXISTS idx_workstations_pinpad ON workstations(pinpad_id);
+CREATE INDEX IF NOT EXISTS idx_workstations_cashier ON workstations(cashier_id);
+CREATE INDEX IF NOT EXISTS idx_workstations_is_active ON workstations(is_active);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_workstations_cashier_active ON workstations (cashier_id) WHERE cashier_id IS NOT NULL;
+
+-- -----------------------------------------------------
+-- Таблица: checks (чеки)
+-- -----------------------------------------------------
+CREATE TABLE IF NOT EXISTS checks (
+    check_id        SERIAL PRIMARY KEY,
+    cashier_id      INTEGER NOT NULL,
+    ws_id           INTEGER NOT NULL,
+    positions       JSONB NOT NULL,
+    total_amount    NUMERIC(10, 2) NOT NULL,
+    payment_type    VARCHAR(10) NOT NULL CHECK (payment_type IN ('cash', 'card')),
+    created_at      TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    status          VARCHAR(20) NOT NULL DEFAULT 'pending' 
+                    CHECK (status IN ('pending', 'queued', 'processing', 'success', 'payment_error', 'kkt_error', 'failed')),
+    fiscal_data     JSONB,
+    pos_data        JSONB,
+
+    CONSTRAINT fk_check_cashier FOREIGN KEY (cashier_id) REFERENCES cashiers(cashier_id) ON DELETE RESTRICT,
+    CONSTRAINT fk_check_workstation FOREIGN KEY (ws_id) REFERENCES workstations(ws_id) ON DELETE RESTRICT
+);
+
+-- Индексы
+CREATE INDEX IF NOT EXISTS idx_checks_cashier ON checks(cashier_id);
+CREATE INDEX IF NOT EXISTS idx_checks_ws ON checks(ws_id);
+CREATE INDEX IF NOT EXISTS idx_checks_status ON checks(status);
+CREATE INDEX IF NOT EXISTS idx_checks_payment_type ON checks(payment_type);
+CREATE INDEX IF NOT EXISTS idx_checks_created_at ON checks(created_at);
+CREATE INDEX IF NOT EXISTS idx_checks_positions ON checks USING GIN (positions);
+
+-- -----------------------------------------------------
+-- Таблица: background_tasks (фоновые задачи)
+-- -----------------------------------------------------
+CREATE TABLE IF NOT EXISTS background_tasks (
+    task_id         SERIAL PRIMARY KEY,
+    task_type       VARCHAR(50) NOT NULL CHECK (task_type IN ('send_to_kkt', 'process_payment')),
+    target_id       INTEGER NOT NULL,
+    payload         JSONB NOT NULL,
+    status          VARCHAR(20) NOT NULL DEFAULT 'pending' 
+                    CHECK (status IN ('pending', 'in_progress', 'completed', 'failed')),
+    created_at      TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    last_attempt_at TIMESTAMP WITH TIME ZONE,
+    retry_count     INTEGER NOT NULL DEFAULT 0,
+    next_retry_at   TIMESTAMP WITH TIME ZONE,
+    related_check_id INTEGER,
+
+    CONSTRAINT fk_task_check FOREIGN KEY (related_check_id) REFERENCES checks(check_id) ON DELETE CASCADE
+);
+
+-- Индексы
+CREATE INDEX IF NOT EXISTS idx_background_tasks_type ON background_tasks(task_type);
+CREATE INDEX IF NOT EXISTS idx_background_tasks_status ON background_tasks(status);
+CREATE INDEX IF NOT EXISTS idx_background_tasks_target ON background_tasks(target_id);
+CREATE INDEX IF NOT EXISTS idx_background_tasks_next_retry ON background_tasks(next_retry_at) WHERE status = 'failed';
+CREATE INDEX IF NOT EXISTS idx_background_tasks_check ON background_tasks(related_check_id);
+
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+-- -----------------------------------------------------
+-- Таблица: customers (абоненты)
+-- -----------------------------------------------------
+CREATE TABLE IF NOT EXISTS customers (
+    customer_id       SERIAL PRIMARY KEY,
+    full_name         VARCHAR(255) NOT NULL,
+    account_number    VARCHAR(50) NOT NULL UNIQUE,
+    address           TEXT NOT NULL,
+    phone             VARCHAR(20),
+    email             VARCHAR(100),
+    created_at        TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at        TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Индексы для производительности
+CREATE INDEX IF NOT EXISTS idx_customers_full_name ON customers USING GIN (full_name gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_customers_account_number ON customers(account_number);
+CREATE INDEX IF NOT EXISTS idx_customers_address ON customers USING GIN (address gin_trgm_ops);

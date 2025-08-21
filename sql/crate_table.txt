@@ -78,6 +78,8 @@ CREATE TABLE IF NOT EXISTS workstations (
     CONSTRAINT uq_kkt_pinpad UNIQUE (kkt_id, pinpad_id)
 );
 
+ALTER TABLE workstations ADD COLUMN last_activity TIMESTAMP WITH TIME ZONE;
+
 -- Индексы
 CREATE INDEX IF NOT EXISTS idx_workstations_kkt ON workstations(kkt_id);
 CREATE INDEX IF NOT EXISTS idx_workstations_pinpad ON workstations(pinpad_id);

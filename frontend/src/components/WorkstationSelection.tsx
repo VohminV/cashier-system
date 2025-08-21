@@ -1,4 +1,3 @@
-// frontend/src/components/WorkstationSelection.tsx
 import { useState, useEffect } from 'react';
 import {
   Box,
@@ -11,7 +10,7 @@ import {
   CircularProgress,
 } from '@mui/material';
 import { getWorkstations, assignWorkstation, getWorkstationById } from '../services/workstationService';
-import API from '../services/api';
+
 interface Workstation {
   ws_id: number;
   name: string;
@@ -40,83 +39,89 @@ function WorkstationSelection({ onSelect }: { onSelect: (ws: Workstation) => voi
     loadWorkstations();
   }, []);
 
+  const handleSelect = async (workstation) => {
+    try {
+      const user = JSON.parse(localStorage.getItem('user')!);
+      
+      // 1. Привязываем кассира
+      await assignWorkstation(workstation.ws_id, user.cashier_id);
 
-	const handleSelect = async (workstation) => {
-		  try {
-				const user = JSON.parse(localStorage.getItem('user')!);
-				
-				// 1. Привязываем кассира
-				await assignWorkstation(workstation.ws_id, user.cashier_id);
+      // 2. Загружаем полные данные места
+      const response = await getWorkstationById(workstation.ws_id);
+      const fullWorkstation = response.data;
 
-				// 2. Загружаем полные данные места
-				const response = await getWorkstationById(workstation.ws_id);
-				const fullWorkstation = response.data;
+      // 3. Сохраняем в localStorage
+      localStorage.setItem('workstation', JSON.stringify(fullWorkstation));
 
-				// 3. Сохраняем в localStorage
-				localStorage.setItem('workstation', JSON.stringify(fullWorkstation));
+      // 4. Передаём в App
+      onSelect(fullWorkstation);
 
-				// 4. Передаём в App
-				onSelect(fullWorkstation);
+    } catch (err) {
+      setError(`❌ Не удалось занять место: ${err.message}`);
+    }
+  };
 
-		  } catch (err) {
-				setError(`❌ Не удалось занять место: ${err.message}`);
-		  }
-	};
+  if (loading) {
+    return (
+      <Container maxWidth="sm">
+        <Box sx={{ textAlign: 'center', py: 4 }}>
+          <CircularProgress />
+          <Typography>Загрузка кассовых мест...</Typography>
+        </Box>
+      </Container>
+    );
+  }
 
+  if (error) {
+    return (
+      <Container maxWidth="sm">
+        <Box sx={{ my: 4 }}>
+          <Alert severity="error">{error}</Alert>
+        </Box>
+      </Container>
+    );
+  }
 
-	  if (loading) {
-		return (
-		  <Container sx={{ textAlign: 'center', py: 4 }}>
-			<CircularProgress />
-			<Typography>Загрузка кассовых мест...</Typography>
-		  </Container>
-		);
-	  }
+  if (workstations.length === 0) {
+    return (
+      <Container maxWidth="sm">
+        <Box sx={{ my: 4 }}>
+          <Alert severity="info">Нет доступных кассовых мест.</Alert>
+        </Box>
+      </Container>
+    );
+  }
 
-	  if (error) {
-		return (
-		  <Container>
-			<Alert severity="error">{error}</Alert>
-		  </Container>
-		);
-	  }
-
-	  if (workstations.length === 0) {
-		return (
-		  <Container>
-			<Alert severity="info">Нет доступных кассовых мест.</Alert>
-		  </Container>
-		);
-	  }
-
-	  return (
-		<Container maxWidth="sm">
-		  <Typography variant="h5" align="center" gutterBottom>
-			Выберите кассовое место
-		  </Typography>
-		  {workstations.map((ws) => (
-			<Card key={ws.ws_id} sx={{ mb: 2 }}>
-			  <CardContent>
-				<Typography variant="h6">{ws.name}</Typography>
-				<Typography variant="body2" color="text.secondary">
-				  ККТ: {ws.kkt_name} ({ws.kkt_status})
-				</Typography>
-				<Typography variant="body2" color="text.secondary">
-				  Пин-пад: {ws.pinpad_name} ({ws.bank_name})
-				</Typography>
-				<Button
-				  variant="contained"
-				  fullWidth
-				  sx={{ mt: 2 }}
-				  onClick={() => handleSelect(ws)} // ✅ Теперь с вызовом API
-				>
-				  Занять место
-				</Button>
-			  </CardContent>
-			</Card>
-		  ))}
-		</Container>
-	  );
+  return (
+    <Container maxWidth="sm">
+      <Box sx={{ my: 4 }}> {/* Изменено my={4} на my={4} (локальный отступ, можно адаптировать) */}
+        <Typography variant="h5" align="center" gutterBottom>
+          Выберите кассовое место
+        </Typography>
+        {workstations.map((ws) => (
+          <Card key={ws.ws_id} sx={{ mb: 2 }}>
+            <CardContent>
+              <Typography variant="h6">{ws.name}</Typography>
+              <Typography variant="body2" color="text.secondary">
+                ККТ: {ws.kkt_name} ({ws.kkt_status})
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                Пин-пад: {ws.pinpad_name} ({ws.bank_name})
+              </Typography>
+              <Button
+                variant="contained"
+                fullWidth
+                sx={{ mt: 2 }}
+                onClick={() => handleSelect(ws)}
+              >
+                Занять место
+              </Button>
+            </CardContent>
+          </Card>
+        ))}
+      </Box>
+    </Container>
+  );
 }
 
 export default WorkstationSelection;

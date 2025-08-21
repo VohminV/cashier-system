@@ -3,8 +3,6 @@ import { useState } from 'react';
 import {
   Box,
   Button,
-  Container,
-  CssBaseline,
   TextField,
   Typography,
   Paper,
@@ -26,14 +24,12 @@ function LoginForm({ onLoginSuccess }) {
 
     try {
       const response = await API.post('/auth/login', { login, password });
-      
-      // Сохраняем токен и данные пользователя
+
       localStorage.setItem('token', response.data.token);
       localStorage.setItem('user', JSON.stringify(response.data.user));
-      
+
       setMessage(`✅ Добро пожаловать, ${response.data.user.full_name}!`);
-      
-      // Через 1.5 сек — переходим к выбору места
+
       setTimeout(() => {
         onLoginSuccess(response.data.user);
       }, 1500);
@@ -46,63 +42,73 @@ function LoginForm({ onLoginSuccess }) {
   };
 
   return (
-    <Container component="main" maxWidth="xs">
-      <CssBaseline />
-      <Box
+    // ✅ Убрали Container — он не нужен
+    <Box
+      sx={{
+        width: '100%',
+        minHeight: '100vh',
+        bgcolor: '#f5f5f5',
+        px: 2, // отступы по бокам
+        py: 4, // отступ сверху
+        display: 'centr',
+        flexDirection: 'column',
+      }}
+    >
+      {/* ✅ Paper теперь прижат к верху */}
+      <Paper
+        elevation={6}
         sx={{
-          display: 'flex',
-          flexDirection: 'column',
-          minHeight: '100vh',
-          justifyContent: 'center',
-          bgcolor: '#f5f5f5',
+          p: 4,
+          maxWidth: 450,
+          width: '100%',
+          mx: 'auto', // центрируем по горизонтали
+          mt: 6,     // отступ сверху — можно уменьшить до mt: 4 или mt: 2
         }}
       >
-        <Paper elevation={6} sx={{ p: 4 }}>
-          <Typography component="h1" variant="h5" align="center" gutterBottom>
-            Вход в кассовую систему
-          </Typography>
+        <Typography component="h1" variant="h5" align="center" gutterBottom>
+          Вход в кассовую систему
+        </Typography>
 
-          <Box component="form" onSubmit={handleLogin}>
-            <TextField
-              margin="normal"
-              required
-              fullWidth
-              label="Логин"
-              value={login}
-              onChange={(e) => setLogin(e.target.value)}
-              disabled={isLoading}
-            />
-            <TextField
-              margin="normal"
-              required
-              fullWidth
-              label="Пароль"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              disabled={isLoading}
-            />
+        <Box component="form" onSubmit={handleLogin} sx={{ mt: 2 }}>
+          <TextField
+            margin="normal"
+            required
+            fullWidth
+            label="Логин"
+            value={login}
+            onChange={(e) => setLogin(e.target.value)}
+            disabled={isLoading}
+          />
+          <TextField
+            margin="normal"
+            required
+            fullWidth
+            label="Пароль"
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            disabled={isLoading}
+          />
 
-            <Button
-              type="submit"
-              fullWidth
-              variant="contained"
-              size="large"
-              sx={{ mt: 3, py: 1.5 }}
-              disabled={isLoading}
-            >
-              {isLoading ? <CircularProgress size={24} color="inherit" /> : 'Войти'}
-            </Button>
-          </Box>
+          <Button
+            type="submit"
+            fullWidth
+            variant="contained"
+            size="large"
+            sx={{ mt: 3, py: 1.5 }}
+            disabled={isLoading}
+          >
+            {isLoading ? <CircularProgress size={24} color="inherit" /> : 'Войти'}
+          </Button>
+        </Box>
 
-          {message && (
-            <Alert severity={message.includes('✅') ? 'success' : 'error'} sx={{ mt: 3 }}>
-              {message}
-            </Alert>
-          )}
-        </Paper>
-      </Box>
-    </Container>
+        {message && (
+          <Alert severity={message.includes('✅') ? 'success' : 'error'} sx={{ mt: 3 }}>
+            {message}
+          </Alert>
+        )}
+      </Paper>
+    </Box>
   );
 }
 
